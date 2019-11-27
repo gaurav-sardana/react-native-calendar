@@ -9,65 +9,127 @@ import {
   View,
   Animated,
   PanResponder,
+  ScrollView,
 } from 'react-native';
 import moment from 'moment';
 
 export default class Timeline extends Component {
+  _panResponder;
+  point = new Animated.ValueXY();
+
   constructor(props) {
     super(props);
     const {dates, blocks} = props;
     this.state = {
       dates: dates,
       blocks: blocks,
+      dragging: false,
     };
     this.pan = [];
     this.currentPanValue = [];
     this.panListener = [];
+    this._panResponder = PanResponder.create({
+      // Ask to be the responder:
+      onStartShouldSetPanResponder: (evt, gestureState) => true,
+      onStartShouldSetPanResponderCapture: (evt, gestureState) => true,
+      onMoveShouldSetPanResponder: (evt, gestureState) => true,
+      onMoveShouldSetPanResponderCapture: (evt, gestureState) => true,
+
+      //imp
+      onPanResponderGrant: (evt, gestureState) => {
+        // The gesture has started. Show visual feedback so the user knows
+        // what is happening!
+        // gestureState.d{x,y} will be set to zero now
+        this.setState({
+          dragging: true,
+        });
+      },
+      //imp
+      onPanResponderMove: (evt, gestureState) => {
+        Animated.event([{y: this.point.y}])({y: gestureState.moveY});
+        // The most recent move distance is gestureState.move{X,Y}
+        // The accumulated gesture distance since becoming responder is
+        // gestureState.d{x,y}
+      },
+      onPanResponderTerminationRequest: (evt, gestureState) => false,
+      onPanResponderRelease: (evt, gestureState) => {
+        // The user has released all touches while this view is the
+        // responder. This typically means a gesture has succeeded
+        this.setState({
+          dragging: false,
+        });
+      },
+      onPanResponderTerminate: (evt, gestureState) => {
+        // Another component has become the responder, so this gesture
+        // should be cancelled
+      },
+      onShouldBlockNativeResponder: (evt, gestureState) => {
+        // Returns whether this component should block native components from becoming the JS
+        // responder. Returns true by default. Is currently only supported on android.
+        return true;
+      },
+    });
   }
 
   render() {
     const {dates, blocks} = this.props;
-    this.pan = blocks.map(() => new Animated.ValueXY());
-    this.currentPanValue = blocks.map(() => ({x: 0, y: 0}));
-    this.panListener = this.pan.map((pan, index) =>
-      pan.addListener(value => (this.currentPanValue[index] = value)),
-    );
     return (
-      <View style={styles.container}>
+      <ScrollView
+        style={styles.container}
+        onScroll={e => {
+          console.log(e.nativeEvent);
+        }}
+        scrollEventThrottle={16}>
         <View style={styles.listview}>
           <FlatList
+            scrollEnabled={!this.state.dragging}
             data={dates}
             renderItem={this.renderItem}
-            automaticallyAdjustContentInsets={false}
             keyExtractor={(item, key) => item.toString() + key}
-            {...this.props}
+            onLayout={e => {
+              console.log('ON Laayout Called');
+              console.log(e);
+            }}
+            scrollEventThrottle={16}
           />
         </View>
         <View style={styles.blockView}>
-          {blocks.map((block, i) => this.renderBlock(block, i))}
+          {this.state.dragging && (
+            <Animated.View
+              style={{
+                top: this.point.getLayout().top,
+                width: '100%',
+                zIndex: 1,
+              }}>
+              {this.renderBlock(blocks[3], 3, false)}
+            </Animated.View>
+          )}
+          {blocks.map((block, index) => this.renderBlock(block, index, true))}
         </View>
-      </View>
+      </ScrollView>
     );
   }
 
   renderItem = ({item, index}) => {
     return (
-      <View>
-        <View style={styles.rowContainer}>
-          <View style={styles.timeContainer}>
-            {0 != index ? this.renderTime(item, index) : null}
-          </View>
-          <View style={styles.lineVerticalContainer}></View>
-          <View style={styles.lineRowContainer}>
-            {0 != index ? this.renderLineRow(item, index) : null}
-          </View>
+      <View style={styles.rowContainer}>
+        <View style={styles.timeContainer}>
+          {0 != index && this.renderTime(item, index)}
+        </View>
+        <View style={styles.lineVerticalContainer}></View>
+        <View style={styles.lineRowContainer}>
+          {0 != index ? this.renderLineRow(item, index) : null}
         </View>
       </View>
     );
   };
 
   renderTime = (item, index) => {
-    return <Text style={styles.time}>{item}</Text>;
+    return (
+      <Text key={`${item}--${index}`} style={styles.time}>
+        {item}
+      </Text>
+    );
   };
 
   renderLineVertical = (item, index) => {
@@ -78,9 +140,7 @@ export default class Timeline extends Component {
     return <View style={styles.lineRow}></View>;
   };
 
-  renderBlock = (block, index) => {
-    console.log('renderBlock', index);
-
+  renderBlock = (block, index, forceTop) => {
     let startTime = moment(block.startTime);
     let startHour = startTime.hour();
     let startMinutes = startTime.minutes();
@@ -94,26 +154,23 @@ export default class Timeline extends Component {
     let durationInMinutes = totalEndMinute - totalStartMinute;
     let height = (durationInMinutes * 50) / 60;
     const panStyle = {
-      transform: this.pan[index].getTranslateTransform(),
+      // transform: this.pan[index].getTranslateTransform(),
     };
     return (
-      <Animated.View
-        {...this.getPanResponder(index).panHandlers}
+      <View
+        {...this._panResponder.panHandlers}
         key={index}
-        style={[panStyle, styles.block, {top: top, height: height}]}>
+        style={[
+          panStyle,
+          styles.block,
+          {top: forceTop ? top : 0, height: height},
+        ]}>
         <Text style={styles.blockName}>{block.name}</Text>
-        {/**
-        <View style={[styles.block, { top: top, height: height }]}>
-         
-        </View>
-         */}
-      </Animated.View>
+      </View>
     );
   };
 
   getPanResponder(index) {
-    console.log('getPanResponder', index);
-
     return PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onPanResponderMove: Animated.event([
@@ -144,16 +201,13 @@ let styles = StyleSheet.create({
   blockView: {
     flex: 1,
     position: 'absolute',
-    width: '85%',
-    height: '100%',
-    left: '15%',
-    right: 0,
+    width: '80%',
+    marginLeft: '15%',
+    marginRight: '5%',
   },
   block: {
     position: 'absolute',
     width: '100%',
-    //height: 100,
-    //top: 200,
     backgroundColor: 'rgba(192,192,192, 1 )',
     borderRadius: 15,
     borderColor: 'black',
@@ -172,23 +226,27 @@ let styles = StyleSheet.create({
     width: '10%',
   },
   lineVerticalContainer: {
-    borderRightWidth: 0.3,
+    borderRightWidth: 1,
     width: '5%',
+    borderRightColor: '#DAE1E7',
   },
   lineRowContainer: {
     width: '100%',
-    left: '12%',
+    marginLeft: '12%',
     position: 'absolute',
   },
 
   time: {
     textAlign: 'right',
+    marginVertical: -7,
     fontSize: 11,
-    top: -7,
+    color: '#121010',
+    opacity: 0.6,
   },
   lineRow: {
     flex: 1,
     backgroundColor: 'rgba(192,192,192,0.2)',
-    borderBottomWidth: 0.3,
+    borderBottomWidth: 1,
+    borderBottomColor: '#DAE1E7',
   },
 });
