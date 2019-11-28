@@ -86,11 +86,7 @@ let blocks = [
 ];
 
 const App = () => {
-  return (
-    <View style={styles.scrollView}>
-      <Timeline dates={dates} blocks={blocks} />
-    </View>
-  );
+  return <Timeline dates={dates} blocks={blocks} />;
 };
 
 const styles = StyleSheet.create({

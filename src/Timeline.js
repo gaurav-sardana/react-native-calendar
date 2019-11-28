@@ -16,6 +16,8 @@ import moment from 'moment';
 export default class Timeline extends Component {
   _panResponder;
   point = new Animated.ValueXY();
+  scrollOffset = 0;
+  currentIdx = -1;
 
   constructor(props) {
     super(props);
@@ -24,6 +26,7 @@ export default class Timeline extends Component {
       dates: dates,
       blocks: blocks,
       dragging: false,
+      selectedBlockIndex: -1,
     };
     this.pan = [];
     this.currentPanValue = [];
@@ -37,11 +40,15 @@ export default class Timeline extends Component {
 
       //imp
       onPanResponderGrant: (evt, gestureState) => {
-        // The gesture has started. Show visual feedback so the user knows
-        // what is happening!
-        // gestureState.d{x,y} will be set to zero now
+        console.log('onPanResponderGrant Called');
+        console.log(JSON.stringify(gestureState));
+        this.currentIdx = this.getSelectedBlock(
+          gestureState.x0,
+          gestureState.y0,
+        );
         this.setState({
           dragging: true,
+          selectedBlockIndex: this.currentIdx,
         });
       },
       //imp
@@ -55,8 +62,11 @@ export default class Timeline extends Component {
       onPanResponderRelease: (evt, gestureState) => {
         // The user has released all touches while this view is the
         // responder. This typically means a gesture has succeeded
+
+        //send moved block index with gesture state required details
         this.setState({
           dragging: false,
+          selectedBlockIndex: -1,
         });
       },
       onPanResponderTerminate: (evt, gestureState) => {
@@ -77,9 +87,10 @@ export default class Timeline extends Component {
       <ScrollView
         style={styles.container}
         onScroll={e => {
-          console.log(e.nativeEvent);
+          this.scrollOffset = e.nativeEvent.contentOffset.y;
+          console.log(`Y Scrolled : ${this.scrollOffset}`);
         }}
-        scrollEventThrottle={16}>
+        scrollEventThrottle={50}>
         <View style={styles.listview}>
           <FlatList
             scrollEnabled={!this.state.dragging}
@@ -88,9 +99,8 @@ export default class Timeline extends Component {
             keyExtractor={(item, key) => item.toString() + key}
             onLayout={e => {
               console.log('ON Laayout Called');
-              console.log(e);
+              console.log(JSON.stringify(e.nativeEvent));
             }}
-            scrollEventThrottle={16}
           />
         </View>
         <View style={styles.blockView}>
@@ -98,10 +108,16 @@ export default class Timeline extends Component {
             <Animated.View
               style={{
                 top: this.point.getLayout().top,
+                marginVertical: this.scrollOffset,
                 width: '100%',
                 zIndex: 1,
+                position: 'absolute',
               }}>
-              {this.renderBlock(blocks[3], 3, false)}
+              {this.renderBlock(
+                blocks[this.state.selectedBlockIndex],
+                this.state.selectedBlockIndex,
+                false,
+              )}
             </Animated.View>
           )}
           {blocks.map((block, index) => this.renderBlock(block, index, true))}
@@ -140,7 +156,22 @@ export default class Timeline extends Component {
     return <View style={styles.lineRow}></View>;
   };
 
-  renderBlock = (block, index, forceTop) => {
+  getSelectedBlock = (x0, y0) => {
+    var blocks = this.state.blocks;
+    for (var i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      var blockDimenstion = this.getTopAndHeight(block);
+      var clickedPoint = this.scrollOffset + y0;
+      if (
+        clickedPoint >= blockDimenstion.top &&
+        clickedPoint <= blockDimenstion.top + blockDimenstion.height
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  getTopAndHeight = block => {
     let startTime = moment(block.startTime);
     let startHour = startTime.hour();
     let startMinutes = startTime.minutes();
@@ -153,17 +184,30 @@ export default class Timeline extends Component {
     let totalEndMinute = endHour * 60 + endMinutes;
     let durationInMinutes = totalEndMinute - totalStartMinute;
     let height = (durationInMinutes * 50) / 60;
-    const panStyle = {
-      // transform: this.pan[index].getTranslateTransform(),
+    return {
+      top: top,
+      height: height,
     };
+  };
+
+  renderBlock = (block, index, forceTop) => {
+    var blockDimenstion = this.getTopAndHeight(block);
     return (
       <View
         {...this._panResponder.panHandlers}
         key={index}
         style={[
-          panStyle,
           styles.block,
-          {top: forceTop ? top : 0, height: height},
+          {
+            top: forceTop ? blockDimenstion.top : 0,
+            height: blockDimenstion.height,
+            opacity:
+              this.state.selectedBlockIndex > -1 &&
+              this.state.selectedBlockIndex === index &&
+              forceTop
+                ? 0.6
+                : 1,
+          },
         ]}>
         <Text style={styles.blockName}>{block.name}</Text>
       </View>
