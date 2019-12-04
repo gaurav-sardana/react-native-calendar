@@ -17,7 +17,7 @@ export default class Timeline extends Component {
   _panResponder;
   point = new Animated.ValueXY();
   scrollOffset = 0;
-  currentIdx = -1;
+  currentIdx = null;
 
   constructor(props) {
     super(props);
@@ -26,7 +26,7 @@ export default class Timeline extends Component {
       dates: dates,
       blocks: blocks,
       dragging: false,
-      selectedBlockIndex: -1,
+      selectedBlockIndex: null,
     };
     this.pan = [];
     this.currentPanValue = [];
@@ -60,13 +60,20 @@ export default class Timeline extends Component {
       },
       onPanResponderTerminationRequest: (evt, gestureState) => false,
       onPanResponderRelease: (evt, gestureState) => {
+        console.log('onPanResponderRelease');
+        console.log(gestureState.moveY);
+        this.updateActivityDateTime(
+          this.state.selectedBlockIndex,
+          gestureState.moveY,
+        );
+
         // The user has released all touches while this view is the
         // responder. This typically means a gesture has succeeded
 
         //send moved block index with gesture state required details
         this.setState({
           dragging: false,
-          selectedBlockIndex: -1,
+          selectedBlockIndex: null,
         });
       },
       onPanResponderTerminate: (evt, gestureState) => {
@@ -82,13 +89,17 @@ export default class Timeline extends Component {
   }
 
   render() {
-    const {dates, blocks} = this.props;
+    const {dates, blocks} = this.state;
     return (
       <ScrollView
         style={styles.container}
+        scrollEnabled={!this.state.dragging}
         onScroll={e => {
           this.scrollOffset = e.nativeEvent.contentOffset.y;
-          console.log(`Y Scrolled : ${this.scrollOffset}`);
+        }}
+        onLayout={event => {
+          this.xAxisInitial = event.nativeEvent.layout.width * 0.15;
+          this.xAxisFinal = event.nativeEvent.layout.width;
         }}
         scrollEventThrottle={50}>
         <View style={styles.listview}>
@@ -97,34 +108,107 @@ export default class Timeline extends Component {
             data={dates}
             renderItem={this.renderItem}
             keyExtractor={(item, key) => item.toString() + key}
-            onLayout={e => {
-              console.log('ON Laayout Called');
-              console.log(JSON.stringify(e.nativeEvent));
-            }}
           />
         </View>
-        <View style={styles.blockView}>
+        <View
+          style={styles.blockView}
+          onResponderMove={event => {
+            console.log(event.nativeEvent);
+          }}>
           {this.state.dragging && (
             <Animated.View
               style={{
                 top: this.point.getLayout().top,
                 marginVertical: this.scrollOffset,
                 width: '100%',
-                zIndex: 1,
                 position: 'absolute',
               }}>
               {this.renderBlock(
-                blocks[this.state.selectedBlockIndex],
+                this.getBlockById(this.state.selectedBlockIndex),
                 this.state.selectedBlockIndex,
                 false,
               )}
             </Animated.View>
           )}
-          {blocks.map((block, index) => this.renderBlock(block, index, true))}
+          {blocks.map((block, index) => this.renderBlockSets(block, index))}
         </View>
       </ScrollView>
     );
   }
+
+  updateActivityDateTime = (blockId, top) => {
+    var blocks = this.state.blocks;
+    for (var i = 0; i < blocks.length; i++) {
+      for (var j = 0; j < blocks[i].length; j++) {
+        if (blocks[i][j].blockId === blockId) {
+          var block = blocks[i][j];
+          var minutes = (60 * top) / 50;
+          var diff = new Date(block.endTime) - new Date(block.startTime);
+          block.startTime = moment(block.startTime)
+            .set({
+              h: Math.floor(minutes / 60),
+              m: Math.floor(minutes % 60),
+            })
+            .toDate()
+            .toISOString();
+          block.endTime = moment(block.startTime)
+            .add(diff, 'milliseconds')
+            .toDate()
+            .toISOString();
+
+          blocks[i].splice(j, 1);
+          if (blocks[i].length === 0) {
+            blocks.splice(i, 1);
+          }
+          blocks = this.rePopulateBlock(block, blocks);
+          this.setState({
+            blocks: blocks,
+          });
+          break;
+        }
+      }
+    }
+  };
+  rePopulateBlock = (block, blocks) => {
+    for (var i = 0; i < blocks.length; i++) {
+      for (var j = 0; j < blocks[i].length; j++) {
+        if (
+          new Date(block.startTime) >= new Date(blocks[i][j].startTime) &&
+          new Date(block.startTime) <= new Date(blocks[i][j].endTime)
+        ) {
+          blocks[i].push(block);
+          return blocks;
+        }
+      }
+    }
+    blocks.push([block]);
+    return blocks;
+  };
+  getBlockById = blockId => {
+    var blocks = this.state.blocks;
+    for (var i = 0; i < blocks.length; i++) {
+      for (var j = 0; j < blocks[i].length; j++) {
+        if (blocks[i][j].blockId === blockId) {
+          return blocks[i][j];
+        }
+      }
+    }
+    return null;
+  };
+
+  renderBlockSets = (blocks, parentIndex) => {
+    let width = 100 / blocks.length;
+    return blocks.map((block, index) => {
+      let marginLeft = index * width;
+      return this.renderBlock(
+        block,
+        parentIndex + '/' + index,
+        true,
+        width + '%',
+        marginLeft + '%',
+      );
+    });
+  };
 
   renderItem = ({item, index}) => {
     return (
@@ -159,17 +243,25 @@ export default class Timeline extends Component {
   getSelectedBlock = (x0, y0) => {
     var blocks = this.state.blocks;
     for (var i = 0; i < blocks.length; i++) {
-      var block = blocks[i];
-      var blockDimenstion = this.getTopAndHeight(block);
-      var clickedPoint = this.scrollOffset + y0;
-      if (
-        clickedPoint >= blockDimenstion.top &&
-        clickedPoint <= blockDimenstion.top + blockDimenstion.height
-      ) {
-        return i;
+      for (var j = 0; j < blocks[i].length; j++) {
+        var block = blocks[i][j];
+        var length = blocks[i].length;
+        var eachBlockLength = (this.xAxisFinal - this.xAxisInitial) / length;
+        var blockDimenstion = this.getTopAndHeight(block);
+        var clickedPoint = this.scrollOffset + y0;
+        var xMin = this.xAxisInitial + eachBlockLength * j;
+        var xMax = xMin + eachBlockLength;
+        if (
+          clickedPoint >= blockDimenstion.top &&
+          clickedPoint <= blockDimenstion.top + blockDimenstion.height &&
+          x0 >= xMin &&
+          x0 <= xMax
+        ) {
+          return block.blockId;
+        }
       }
     }
-    return -1;
+    return null;
   };
   getTopAndHeight = block => {
     let startTime = moment(block.startTime);
@@ -190,20 +282,23 @@ export default class Timeline extends Component {
     };
   };
 
-  renderBlock = (block, index, forceTop) => {
+  renderBlock = (block, index, forceTop, width = '100%', marginLeft = '0%') => {
     var blockDimenstion = this.getTopAndHeight(block);
     return (
       <View
         {...this._panResponder.panHandlers}
-        key={index}
+        key={block.blockId}
         style={[
           styles.block,
           {
+            width: width,
+            marginLeft: marginLeft,
             top: forceTop ? blockDimenstion.top : 0,
             height: blockDimenstion.height,
+            zIndex: 1,
             opacity:
-              this.state.selectedBlockIndex > -1 &&
-              this.state.selectedBlockIndex === index &&
+              this.state.selectedBlockIndex !== null &&
+              this.state.selectedBlockIndex === block.blockId &&
               forceTop
                 ? 0.6
                 : 1,
@@ -251,9 +346,8 @@ let styles = StyleSheet.create({
   },
   block: {
     position: 'absolute',
-    width: '100%',
     backgroundColor: 'rgba(192,192,192, 1 )',
-    borderRadius: 15,
+    borderRadius: 7,
     borderColor: 'black',
     borderWidth: 0.4,
     justifyContent: 'center',
