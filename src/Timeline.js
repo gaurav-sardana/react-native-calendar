@@ -64,7 +64,7 @@ export default class Timeline extends Component {
         console.log(gestureState.moveY);
         this.updateActivityDateTime(
           this.state.selectedBlockIndex,
-          gestureState.moveY,
+          gestureState.moveY + this.scrollOffset,
         );
 
         // The user has released all touches while this view is the
